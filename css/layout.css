@@ -1,0 +1,36 @@
+:root {
+  --topbar-h: 56px; --nav-h: 64px; --toolrow-h: 68px;
+  --content-max: 720px; --page-pad: var(--space-4); --grid-gap: var(--space-3);
+  --safe-top: env(safe-area-inset-top, 0px); --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px); --safe-left: env(safe-area-inset-left, 0px);
+  --sheet-max-h: 62dvh; --sheet-handle-w: 36px;
+  --z-base: 0; --z-sticky: 10; --z-nav: 20; --z-sheet-scrim: 30; --z-sheet: 40; --z-dialog: 50; --z-toast: 60;
+}
+.app { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; background: var(--color-bg); color: var(--color-text); }
+.app__main { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.screen { display: flex; flex-direction: column; min-height: 100%; width: 100%; max-width: var(--content-max); margin-inline: auto; }
+.screen__body { flex: 1; padding-inline: var(--page-pad); padding-block: var(--space-3) var(--space-6); }
+.bar-top {
+  position: sticky; top: 0; z-index: var(--z-sticky); display: flex; align-items: center; gap: var(--space-2);
+  min-height: calc(var(--topbar-h) + var(--safe-top));
+  padding: var(--safe-top) calc(var(--space-2) + var(--safe-right)) 0 calc(var(--space-2) + var(--safe-left));
+  background: var(--color-bg);
+}
+.bar-bottom {
+  display: flex; align-items: stretch; min-height: calc(var(--nav-h) + var(--safe-bottom));
+  padding: 0 var(--safe-right) var(--safe-bottom) var(--safe-left);
+  background: var(--color-surface); border-top: 1px solid var(--color-border); z-index: var(--z-nav);
+}
+.stack { display: flex; flex-direction: column; gap: var(--space-3); }
+.stack--tight { gap: var(--space-2); }
+.stack--loose { gap: var(--space-5); }
+.row { display: flex; align-items: center; gap: var(--space-2); }
+.row--between { justify-content: space-between; }
+.row--wrap { flex-wrap: wrap; }
+.fill { flex: 1; min-width: 0; }
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--grid-gap); }
+@media (min-width: 768px) { .grid-2 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.scroll-x { display: flex; gap: var(--space-2); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.scroll-x::-webkit-scrollbar { display: none; }
+.scroll-x > * { flex: none; }
+.scroll-x--fade { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
