@@ -12,7 +12,8 @@ const CSS = `
 .stage__box { position: absolute; border: 2px dashed #4ade80; box-sizing: border-box; transform: translate(-50%, -50%); }
 .stage__box--round { border-radius: 50%; }
 .stage__box--slot { border-style: solid; border-color: rgba(255,255,255,0.7); transform: none; }
-.stage__corner { position: absolute; width: 10px; height: 10px; background: #4ade80; border-radius: 50%; }`;
+.stage__corner { position: absolute; width: 10px; height: 10px; background: #4ade80; border-radius: 50%; }
+.stage__corner--grab { border: 2px solid #fff; box-sizing: border-box; }`;
 
 // The editing surface: a canvas that fits the screen, with pinch zoom, pan, and selection boxes.
 export function createStage({ compare = false } = {}) {
@@ -61,7 +62,10 @@ export function createStage({ compare = false } = {}) {
     onTap: (pos) => handlers.tap && handlers.tap(pos),
     onDoubleTap: (pos) => handlers.doubleTap && handlers.doubleTap(pos),
     onEnd: () => handlers.end && handlers.end(),
-    filter: (e) => !(handlers.ignore && handlers.ignore(e)),
+    filter: (e) => {
+      if (handlers.down) handlers.down(e);
+      return !(handlers.ignore && handlers.ignore(e));
+    },
   });
 
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => { layout(); if (onResize) onResize(); }) : null;
@@ -111,12 +115,16 @@ export function createStage({ compare = false } = {}) {
           box.style.width = Math.max(it.w, 0.01) * 100 + '%';
           box.style.height = Math.max(it.h, 0.01) * 100 + '%';
           box.style.transform = 'translate(-50%, -50%) rotate(' + (it.rot || 0) + 'deg)';
-          if (it.kind !== 'ellipse') {
+          // Draggable corner dots (it.handles) are bigger so a finger can grab them
+          if (it.kind !== 'ellipse' || it.handles) {
+            const size = it.handles ? 18 : 10;
             ['0 0', '100% 0', '0 100%', '100% 100%'].forEach((pos) => {
               const [l, t] = pos.split(' ');
-              const c = h('span', { class: 'stage__corner' });
-              c.style.left = l === '0' ? '-6px' : 'calc(100% - 4px)';
-              c.style.top = t === '0' ? '-6px' : 'calc(100% - 4px)';
+              const c = h('span', { class: 'stage__corner' + (it.handles ? ' stage__corner--grab' : '') });
+              c.style.width = size + 'px';
+              c.style.height = size + 'px';
+              c.style.left = l === '0' ? -(size / 2 + 1) + 'px' : 'calc(100% - ' + (size / 2 - 1) + 'px)';
+              c.style.top = t === '0' ? -(size / 2 + 1) + 'px' : 'calc(100% - ' + (size / 2 - 1) + 'px)';
               box.append(c);
             });
           }
