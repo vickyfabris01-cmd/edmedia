@@ -325,6 +325,107 @@ function drawWatermark(ctx, layer, sources, W, H) {
   ctx.restore();
 }
 
+// ---------- Blur ----------
+
+// Blurs a copy of src. Large radii are blurred on a smaller copy, then scaled back up, which is much faster.
+function blurredCopy(src, bw, bh, radius) {
+  const f = Math.max(1, Math.floor(radius / 3));
+  const sw = Math.max(1, Math.round(bw / f));
+  const sh = Math.max(1, Math.round(bh / f));
+  const small = createCanvas(sw, sh);
+  const sctx = small.getContext('2d');
+  sctx.imageSmoothingEnabled = true;
+  sctx.imageSmoothingQuality = 'high';
+  sctx.drawImage(src, 0, 0, sw, sh);
+  const id = sctx.getImageData(0, 0, sw, sh);
+  blurImageData(id, Math.max(1, radius / f), 2);
+  sctx.putImageData(id, 0, 0);
+  if (f === 1) return small;
+  const out = createCanvas(bw, bh);
+  const octx = out.getContext('2d');
+  octx.imageSmoothingEnabled = true;
+  octx.imageSmoothingQuality = 'high';
+  octx.drawImage(small, 0, 0, bw, bh);
+  return out;
+}
+
+// Pixel box that a blur layer touches (before soft edge), or null when it has nothing to blur.
+function blurArea(layer, W, H) {
+  if (layer.shape === 'brush') {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    (layer.strokes || []).forEach((s) => {
+      if (s.erase) return;
+      const r = (s.size * W) / 2;
+      s.pts.forEach(([px, py]) => {
+        x0 = Math.min(x0, px * W - r); x1 = Math.max(x1, px * W + r);
+        y0 = Math.min(y0, py * H - r); y1 = Math.max(y1, py * H + r);
+      });
+    });
+    return x0 === Infinity ? null : { x0, y0, x1, y1 };
+  }
+  const hw = (layer.w * W) / 2;
+  const hh = (layer.h * H) / 2;
+  return { x0: layer.cx * W - hw, y0: layer.cy * H - hh, x1: layer.cx * W + hw, y1: layer.cy * H + hh };
+}
+
+function drawBlur(ctx, layer, W, H) {
+  const area = blurArea(layer, W, H);
+  if (!area) return;
+  const feather = ((layer.feather || 0) / 100) * Math.min(W, H) * 0.06;
+  const pad = Math.ceil(feather * 2 + 2);
+  const bx = Math.max(0, Math.floor(area.x0 - pad));
+  const by = Math.max(0, Math.floor(area.y0 - pad));
+  const bw = Math.min(W, Math.ceil(area.x1 + pad)) - bx;
+  const bh = Math.min(H, Math.ceil(area.y1 + pad)) - by;
+  if (bw < 1 || bh < 1) return;
+
+  // The soft-edged shape that decides where the blur shows
+  const mask = createCanvas(bw, bh);
+  const mc = mask.getContext('2d');
+  mc.translate(-bx, -by);
+  mc.fillStyle = '#fff';
+  mc.strokeStyle = '#fff';
+  if (layer.shape === 'brush') {
+    mc.lineCap = 'round';
+    mc.lineJoin = 'round';
+    (layer.strokes || []).forEach((s) => {
+      mc.globalCompositeOperation = s.erase ? 'destination-out' : 'source-over';
+      mc.lineWidth = Math.max(1, s.size * W);
+      if (s.pts.length === 1) {
+        mc.beginPath();
+        mc.arc(s.pts[0][0] * W, s.pts[0][1] * H, mc.lineWidth / 2, 0, Math.PI * 2);
+        mc.fill();
+      } else {
+        mc.beginPath();
+        s.pts.forEach(([px, py], i) => { if (i) mc.lineTo(px * W, py * H); else mc.moveTo(px * W, py * H); });
+        mc.stroke();
+      }
+    });
+  } else {
+    mc.beginPath();
+    if (layer.shape === 'rect') mc.rect(area.x0, area.y0, area.x1 - area.x0, area.y1 - area.y0);
+    else mc.ellipse((area.x0 + area.x1) / 2, (area.y0 + area.y1) / 2, Math.max(1, (area.x1 - area.x0) / 2), Math.max(1, (area.y1 - area.y0) / 2), 0, 0, Math.PI * 2);
+    mc.fill();
+  }
+  mc.setTransform(1, 0, 0, 1, 0, 0);
+  mc.globalCompositeOperation = 'source-over';
+  if (feather > 1) {
+    const id = mc.getImageData(0, 0, bw, bh);
+    blurImageData(id, feather / 2, 2);
+    mc.putImageData(id, 0, 0);
+  }
+
+  // Blur what is already drawn underneath, keep only the masked part
+  const under = createCanvas(bw, bh);
+  under.getContext('2d').drawImage(ctx.canvas, bx, by, bw, bh, 0, 0, bw, bh);
+  const radius = Math.max(1, ((layer.strength || 0) / 100) * 0.05 * Math.max(W, H));
+  const blurred = blurredCopy(under, bw, bh, radius);
+  const bc = blurred.getContext('2d');
+  bc.globalCompositeOperation = 'destination-in';
+  bc.drawImage(mask, 0, 0);
+  ctx.drawImage(blurred, bx, by);
+}
+
 // ---------- Bounds for selection and hit testing (canvas pixels) ----------
 
 export function layerBounds(layer, recipe, sources) {
@@ -340,6 +441,10 @@ export function layerBounds(layer, recipe, sources) {
     const minH = Math.max(layer.thickness * W * 3, W * 0.03);
     const line = layer.shape === 'line' || layer.shape === 'arrow';
     return { cx: layer.x * W, cy: layer.y * H, w: layer.w * W, h: line ? minH : Math.max(layer.h * H, minH), rot: layer.rotation || 0 };
+  }
+  if (layer.type === 'blur') {
+    const a = blurArea(layer, W, H);
+    return a ? { cx: (a.x0 + a.x1) / 2, cy: (a.y0 + a.y1) / 2, w: a.x1 - a.x0, h: a.y1 - a.y0, rot: 0 } : null;
   }
   if (layer.type === 'watermark' && !layer.tiled) {
     const c = wmContent(layer, sources, W);
@@ -374,6 +479,7 @@ export function renderRecipe(target, recipe, sources, opts = {}) {
     else if (layer.type === 'text') drawText(ctx, layer, W, H);
     else if (layer.type === 'shape') drawShape(ctx, layer, W, H);
     else if (layer.type === 'watermark') drawWatermark(ctx, layer, src, W, H);
+    else if (layer.type === 'blur') drawBlur(ctx, layer, W, H);
     ctx.restore();
   }
   return target;

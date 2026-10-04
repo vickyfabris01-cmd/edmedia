@@ -75,10 +75,20 @@ export function newWatermarkLayer(partial = {}) {
   };
 }
 
+// One blurred area. shape: 'brush' (strokes, points as fractions of the canvas), 'rect' or 'ellipse' (cx, cy, w, h as fractions of the canvas).
+export function newBlurLayer(partial = {}) {
+  return {
+    id: newId(), type: 'blur', name: 'Blur', visible: true, opacity: 1,
+    shape: 'brush', strength: 60, feather: 20, lock: false,
+    cx: 0.5, cy: 0.5, w: 0.4, h: 0.3, strokes: [], ...partial,
+  };
+}
+
 export function layerLabel(layer) {
   if (layer.type === 'photo') return 'Photo';
   if (layer.type === 'text') return (layer.content || 'Text').split('\n')[0].slice(0, 24) || 'Text';
   if (layer.type === 'shape') return SHAPE_LABELS[layer.shape] || 'Shape';
   if (layer.type === 'watermark') return layer.mode === 'logo' ? 'Logo watermark' : 'Watermark';
+  if (layer.type === 'blur') return layer.shape === 'rect' ? 'Blur (rectangle)' : layer.shape === 'ellipse' ? 'Blur (ellipse)' : 'Blur (brush)';
   return 'Layer';
 }

@@ -12,13 +12,14 @@ import { CropPanel } from '../editor/panels/crop.js';
 import { AdjustPanel } from '../editor/panels/adjust.js';
 import { FiltersPanel } from '../editor/panels/filters.js';
 import { MaskPanel } from '../editor/panels/mask.js';
+import { BlurPanel } from '../editor/panels/blur.js';
 import { TextPanel } from '../editor/panels/text.js';
 import { WatermarkPanel } from '../editor/panels/watermark.js';
 import { ShapesPanel } from '../editor/panels/shapes.js';
 import { LayersPanel } from '../editor/panels/layers.js';
 import { ResizePanel } from '../editor/panels/resize.js';
 import { History } from '../engine/history.js';
-import { blankRecipe, cloneRecipe, fitSize, getPhotoLayer, templateRecipeFrom } from '../engine/recipe.js';
+import { blankRecipe, cloneRecipe, fitSize, getPhotoLayer, layerLabel, templateRecipeFrom } from '../engine/recipe.js';
 import { fixPhotoPosition, layerBounds } from '../engine/render.js';
 import { getPreset } from '../engine/filters.js';
 import { loadBitmap, sourceSize } from '../engine/canvas.js';
@@ -38,7 +39,11 @@ const CSS = `
 .editor__based { position: absolute; top: var(--space-2); left: var(--space-2); z-index: 3; max-width: 70%; padding: 3px var(--space-3); border-radius: var(--radius-pill);
   background: rgba(0,0,0,0.6); color: #f1f7f3; font-size: var(--text-caption); font-weight: var(--weight-semibold); pointer-events: none; }
 .editor__tag { position: absolute; top: var(--space-2); right: var(--space-2); z-index: 3; padding: 3px var(--space-3); border-radius: var(--radius-pill); background: var(--color-accent); color: var(--color-on-accent); font-size: var(--text-caption); font-weight: var(--weight-bold); pointer-events: none; }
-.dock { background: var(--color-surface); border-top: 1px solid var(--color-border); padding-bottom: var(--safe-bottom); }
+.dock { position: relative; background: var(--color-surface); border-top: 1px solid var(--color-border); padding-bottom: var(--safe-bottom); }
+.selbar { position: absolute; right: var(--space-3); bottom: calc(100% + var(--space-2)); z-index: 4; display: flex; align-items: center; max-width: 70%;
+  padding-left: var(--space-3); border-radius: var(--radius-pill); background: rgba(0,0,0,0.7); color: #f1f7f3; }
+.selbar__name { min-width: 0; font-size: var(--text-caption); font-weight: var(--weight-semibold); }
+.editor .icon-btn--danger { color: var(--color-danger); }
 .tools { padding: var(--space-1) var(--space-2); gap: 0; }
 .tool { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 68px; min-height: 60px; color: var(--color-text-secondary); font-size: var(--text-tiny); font-weight: var(--weight-semibold); border-radius: var(--radius-md); }
 .tool:active { background: var(--color-accent-soft); color: var(--color-accent); }
@@ -51,6 +56,7 @@ const TOOLS = [
   { id: 'adjust', label: 'Adjust', icon: 'adjust', make: AdjustPanel },
   { id: 'filters', label: 'Filters', icon: 'filters', make: FiltersPanel },
   { id: 'mask', label: 'Mask', icon: 'mask', make: MaskPanel },
+  { id: 'blur', label: 'Blur', icon: 'blur', make: BlurPanel },
   { id: 'text', label: 'Text', icon: 'text', make: TextPanel },
   { id: 'watermark', label: 'Watermark', icon: 'watermark', make: WatermarkPanel },
   { id: 'shapes', label: 'Shapes', icon: 'shapes', make: ShapesPanel },
@@ -58,6 +64,7 @@ const TOOLS = [
   { id: 'resize', label: 'Resize', icon: 'resize', make: ResizePanel },
 ];
 
+const DELETE_TOOLS = ['text', 'watermark', 'shapes', 'blur'];
 const GROUPS = { square: 'Square', portrait: 'Portrait', story: 'Story', wide: 'Wide' };
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -122,10 +129,14 @@ export default async function editor(view, params, ctx) {
   let saveTimer = 0;
   let thumbTimer = 0;
   let writing = Promise.resolve();
+  let panelDeleteBtn = null;
+  let selBar = null;
+  let selName = null;
   const snap = () => JSON.stringify(recipe);
   const photoLayer = () => getPhotoLayer(recipe);
   const selected = () => recipe.layers.find((l) => l.id === selectedId) || null;
   const movable = (l) => l && (l.type === 'text' || l.type === 'shape' || l.type === 'watermark');
+  const deletable = (l) => !!l && l.type !== 'photo';
 
   async function ensureAsset(id) {
     if (!id || sources.assets.has(id)) return;
@@ -169,7 +180,18 @@ export default async function editor(view, params, ctx) {
     raf = requestAnimationFrame(() => { raf = 0; draw(); });
   }
 
+  function updateDeleteUi() {
+    const sel = selected();
+    const can = deletable(sel);
+    if (panelDeleteBtn) panelDeleteBtn.hidden = !can;
+    if (selBar) {
+      selBar.hidden = !!panel || !can;
+      if (can) selName.textContent = layerLabel(sel);
+    }
+  }
+
   function refreshOverlay() {
+    updateDeleteUi();
     if (showOriginal) { stage.setOverlays([]); return; }
     const W = recipe.canvas.width;
     const H = recipe.canvas.height;
@@ -181,7 +203,9 @@ export default async function editor(view, params, ctx) {
     } else if (tool === 'mask') {
       const m = photoLayer().mask;
       const s = recipe.slot;
-      if (m) items.push({ kind: m.shape === 'ellipse' ? 'ellipse' : 'rect', cx: s.x + m.cx * s.w, cy: s.y + m.cy * s.h, w: m.rx * 2 * s.w, h: m.ry * 2 * s.h, rot: 0 });
+      if (m) items.push({ kind: m.shape === 'ellipse' ? 'ellipse' : 'rect', cx: s.x + m.cx * s.w, cy: s.y + m.cy * s.h, w: m.rx * 2 * s.w, h: m.ry * 2 * s.h, rot: 0, handles: true });
+    } else if (panel && panel.built.overlay) {
+      items.push(...panel.built.overlay());
     } else {
       const sel = selected();
       const b = sel && layerBounds(sel, recipe, sources);
@@ -233,6 +257,7 @@ export default async function editor(view, params, ctx) {
       });
       refreshOverlay();
     },
+    stageRect: () => stage.rect(),
     ensureAsset,
     render: requestRender,
     refresh: refreshOverlay,
@@ -240,8 +265,13 @@ export default async function editor(view, params, ctx) {
   };
 
   // ---------- Gestures ----------
+  // An open tool panel can take over gestures (it returns true when it handled one)
+  const pg = () => (panel && panel.built.gestures) || null;
   stage.handlers = {
-    drag(dx, dy) {
+    down(e) { const g = pg(); if (g && g.down) g.down(e); },
+    drag(dx, dy, e) {
+      const g = pg();
+      if (g && g.drag && g.drag(dx, dy, e)) return;
       const r = stage.rect();
       const tool = panel && panel.def.id;
       const p = photoLayer();
@@ -258,6 +288,8 @@ export default async function editor(view, params, ctx) {
       }
     },
     pinch(ratio, cx, cy, dx, dy) {
+      const g = pg();
+      if (g && g.pinch && g.pinch(ratio)) return;
       const tool = panel && panel.def.id;
       const p = photoLayer();
       const sel = selected();
@@ -277,6 +309,8 @@ export default async function editor(view, params, ctx) {
       }
     },
     tap(pos) {
+      const g = pg();
+      if (g && g.tap && g.tap(pos)) return;
       if (panel && (panel.def.id === 'crop' || panel.def.id === 'mask')) return;
       const r = stage.rect();
       const W = recipe.canvas.width;
@@ -300,7 +334,9 @@ export default async function editor(view, params, ctx) {
       selectedId = hit ? hit.id : null;
       refreshOverlay();
     },
-    doubleTap() {
+    doubleTap(pos) {
+      const g = pg();
+      if (g && g.doubleTap && g.doubleTap(pos)) return;
       const tool = panel && panel.def.id;
       if (tool === 'crop') {
         change(() => { const p = photoLayer(); p.zoom = p.zoom > 1.05 ? 1 : 2; fixPhotoPosition(recipe, bitmap); });
@@ -308,7 +344,11 @@ export default async function editor(view, params, ctx) {
         stage.resetView();
       }
     },
-    end: commitGesture,
+    end() {
+      const g = pg();
+      if (g && g.end) g.end();
+      commitGesture();
+    },
   };
   stage.onResize = requestRender;
 
@@ -370,7 +410,29 @@ export default async function editor(view, params, ctx) {
     btn.addEventListener('click', () => openTool(def));
     toolRow.append(btn);
   });
-  dock.append(toolRow);
+  selName = h('span', { class: 'selbar__name truncate' });
+  const selDelete = IconButton({ icon: 'trash', label: 'Delete selected layer', onClick: deleteSelected });
+  selDelete.classList.add('icon-btn--danger');
+  selBar = h('div', { class: 'selbar' }, selName, selDelete);
+  selBar.hidden = true;
+  dock.append(selBar, toolRow);
+
+  // Delete from the floating bar (no panel open): one undo step
+  function deleteSelected() {
+    const sel = selected();
+    if (!deletable(sel)) return;
+    api.removeLayer(sel.id);
+    commitGesture();
+    showToast('Layer deleted');
+  }
+
+  // Delete from inside a tool panel: remove the layer and close the panel
+  function deleteFromPanel() {
+    const sel = selected();
+    if (!deletable(sel)) return;
+    api.removeLayer(sel.id);
+    closePanel(true);
+  }
 
   function openTool(def) {
     if (panel) return;
@@ -378,8 +440,14 @@ export default async function editor(view, params, ctx) {
     const selectedBefore = selectedId;
     const built = def.make(api);
     panel = { def, snapshot, selectedBefore, built };
+    panelDeleteBtn = null;
+    if (DELETE_TOOLS.includes(def.id)) {
+      panelDeleteBtn = IconButton({ icon: 'trash', label: 'Delete layer', onClick: deleteFromPanel });
+      panelDeleteBtn.classList.add('icon-btn--danger');
+    }
     const head = h('div', { class: 'pn__head' },
       h('h2', { class: 'pn__title' }, built.title),
+      ...(panelDeleteBtn ? [panelDeleteBtn] : []),
       Button({ label: 'Cancel', variant: 'secondary', small: true, onClick: () => closePanel(false) }),
       Button({ label: 'Done', variant: 'primary', small: true, onClick: () => closePanel(true) })
     );
@@ -400,8 +468,9 @@ export default async function editor(view, params, ctx) {
       validSelection();
     }
     panel = null;
+    panelDeleteBtn = null;
     gestureSnap = null;
-    dock.replaceChildren(toolRow);
+    dock.replaceChildren(selBar, toolRow);
     updateButtons();
     draw();
   }
