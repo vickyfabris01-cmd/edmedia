@@ -9,13 +9,16 @@ function make(id, name, width, height, build) {
 }
 
 export const BUILTIN_TEMPLATES = [
-  make('builtin-square-frame', 'Square - Clean Frame', 1080, 1080, (r) => {
+  make('builtin-square-frame', 'Clean Frame', 1080, 1080, (r) => {
     r.layers.push(newShapeLayer('frame', { color: '#ffffff', thickness: 0.03, name: 'Frame' }));
   }),
-  make('builtin-portrait-mark', 'Portrait 4:5 - Watermark', 1080, 1350, (r) => {
+make('builtin-vivid', 'Vivid', 1080, 1920, (r, p) => {
+    p.filter = { preset: 'vivid', intensity: 1 };
+  }),
+  make('builtin-portrait-mark', 'Watermark', 1080, 1350, (r) => {
     r.layers.push(newWatermarkLayer({ text: 'YOUR BRAND', position: 'br', size: 0.22, opacity: 0.85 }));
   }),
-  make('builtin-story-caption', 'Story - Caption Bar', 1080, 1920, (r) => {
+  make('builtin-story-caption', 'Caption Bar', 1080, 1920, (r) => {
     r.layers.push(
       newShapeLayer('rect', { x: 0.5, y: 0.9, w: 1, h: 0.2, fill: true, thickness: 0, color: '#000000', opacity: 0.55, name: 'Bar' }),
       newTextLayer({ content: 'YOUR CAPTION', x: 0.5, y: 0.9, size: 0.07, name: 'Caption' })

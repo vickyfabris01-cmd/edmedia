@@ -27,7 +27,8 @@ import { makeThumbnailBlob } from '../engine/thumbnail.js';
 import { getProject, saveProject } from '../store/projects.js';
 import { getPhoto, savePhoto } from '../store/photos.js';
 import { getAsset } from '../store/assets.js';
-import { listAllTemplates, saveTemplate, ratioGroup } from '../store/templates.js';
+import { listAllTemplates, saveTemplate } from '../store/templates.js';
+import { checkName } from '../utils/naming.js';
 import { takePendingPhoto } from '../state.js';
 import { newId } from '../utils/ids.js';
 import { h, injectStyle } from '../utils/dom.js';
@@ -65,7 +66,6 @@ const TOOLS = [
 ];
 
 const DELETE_TOOLS = ['text', 'watermark', 'shapes', 'blur'];
-const GROUPS = { square: 'Square', portrait: 'Portrait', story: 'Story', wide: 'Wide' };
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 export default async function editor(view, params, ctx) {
@@ -476,10 +476,9 @@ export default async function editor(view, params, ctx) {
   }
 
   // ---------- Overflow actions ----------
-  async function autoName() {
-    const W = recipe.canvas.width;
-    const H = recipe.canvas.height;
-    const parts = [GROUPS[ratioGroup(W, H)] + ' ' + W];
+  // The style or effect applied (the size is shown on its own line, so it is not part of the name).
+  async function autoName(existing) {
+    const parts = [];
     const wm = recipe.layers.find((l) => l.type === 'watermark' && l.visible);
     if (wm) {
       let label = 'Watermark';
@@ -488,7 +487,11 @@ export default async function editor(view, params, ctx) {
     }
     const f = photoLayer().filter;
     if (f && f.preset !== 'original') parts.push(String(f.preset).startsWith('user:') ? 'Custom look' : getPreset(f.preset).label);
-    return parts.join(' - ');
+    const base = parts.length ? parts.join(' - ') : 'Custom template';
+    let candidate = base;
+    let i = 2;
+    while (checkName(candidate, existing) !== 'available') candidate = base + ' ' + i++;
+    return candidate;
   }
 
   async function saveAsTemplate() {
@@ -497,9 +500,10 @@ export default async function editor(view, params, ctx) {
       const thumbnail = await makeThumbnailBlob(templateRecipe, sources, 360);
       const url = URL.createObjectURL(thumbnail);
       const preview = h('img', { src: url, alt: 'Template preview', style: 'max-height:22dvh;max-width:100%;object-fit:contain;border-radius:12px;align-self:center;' });
+      const existing = await listAllTemplates();
       const name = await openNameSheet({
-        title: 'Save as template', initial: await autoName(), confirmLabel: 'Save',
-        templates: await listAllTemplates(), preview,
+        title: 'Save as template', initial: await autoName(existing), confirmLabel: 'Save',
+        templates: existing, preview,
       });
       URL.revokeObjectURL(url);
       if (!name) return;

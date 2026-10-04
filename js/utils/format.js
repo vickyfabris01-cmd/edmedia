@@ -5,6 +5,12 @@ export function formatDate(ts) {
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// "1080 \u00d7 1350"
+export function formatDimensions(width, height) {
+  if (!width || !height) return '';
+  return width + ' \u00d7 ' + height;
+}
+
 export function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) return '';
   if (bytes < 1024) return bytes + ' B';

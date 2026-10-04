@@ -2,7 +2,7 @@
 
 import { openSheet } from './BottomSheet.js';
 import { Button } from './Button.js';
-import { formatDate } from '../utils/format.js';
+import { formatDate, formatDimensions } from '../utils/format.js';
 import { injectStyle } from '../utils/dom.js';
 
 const CSS = `
@@ -10,6 +10,7 @@ const CSS = `
 .tsheet__preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .tsheet__name { font-size: var(--text-h2); font-weight: var(--weight-semibold); }
 .tsheet__meta { color: var(--color-text-secondary); font-size: var(--text-caption); font-weight: var(--weight-medium); }
+.tsheet__origin { margin-top: var(--space-1); font-size: var(--text-tiny); opacity: 0.75; }
 .tsheet__row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }`;
 
 export function openTemplateSheet({ template, onUse, onDuplicate, onRename, onDelete } = {}) {
@@ -32,8 +33,11 @@ export function openTemplateSheet({ template, onUse, onDuplicate, onRename, onDe
   name.textContent = template.name;
   const meta = document.createElement('div');
   meta.className = 'tsheet__meta';
-  meta.textContent = template.width + ' \u00d7 ' + template.height + (template.builtin ? '  -  Built-in template' : '  -  Created ' + formatDate(template.createdAt || template.updatedAt));
-  info.append(name, meta);
+  meta.textContent = formatDimensions(template.width, template.height);
+  const origin = document.createElement('div');
+  origin.className = 'tsheet__meta tsheet__origin';
+  origin.textContent = template.builtin ? 'Built-in template' : 'Created ' + formatDate(template.createdAt || template.updatedAt);
+  info.append(name, meta, origin);
   function act(callback) { return () => { sheet.close(); if (callback) callback(template); }; }
   body.append(preview, info, Button({ label: 'Use template', variant: 'primary', full: true, onClick: act(onUse) }));
   if (template.builtin) {
