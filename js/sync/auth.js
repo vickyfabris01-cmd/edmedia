@@ -92,6 +92,21 @@ export async function updatePassword(password) {
   await authFetch('/user', { method: 'PUT', token, body: { password } });
 }
 
+// Signed-in change: the current password is checked first, then the new one is set.
+export async function changePassword(currentPassword, newPassword) {
+  const s = load();
+  if (!s || !s.user || !s.user.email) throw new Error('Not signed in');
+  let data;
+  try {
+    data = await authFetch('/token?grant_type=password', { method: 'POST', body: { email: s.user.email, password: currentPassword } });
+  } catch (err) {
+    if (err.status === 400 || err.status === 401) throw new Error('The current password is not correct.');
+    throw err;
+  }
+  await authFetch('/user', { method: 'PUT', token: data.access_token, body: { password: newPassword } });
+  save(sessionFrom(data, s.user)); // keep the fresh session; no sync is needed for this
+}
+
 export function signOut() {
   save(null);
   emit();
@@ -118,6 +133,18 @@ function parseJwt(token) {
     const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
     return JSON.parse(decodeURIComponent(escape(atob(payload))));
   } catch { return null; }
+}
+
+// An expired or already used email link comes back as #error=...&error_code=otp_expired. Returns a message or null.
+export function consumeAuthError() {
+  const hash = location.hash.replace(/^#/, '');
+  if (!hash.includes('error=') && !hash.includes('error_code=')) return null;
+  const p = new URLSearchParams(hash);
+  const code = p.get('error_code') || p.get('error') || '';
+  history.replaceState(null, '', location.pathname + location.search + '#/');
+  return code === 'otp_expired' || code === 'access_denied'
+    ? 'That link has expired or was already used. Request a new one.'
+    : p.get('error_description') || 'That link did not work. Request a new one.';
 }
 
 // Handles the links in confirmation and password-reset emails. Returns the link type or null.

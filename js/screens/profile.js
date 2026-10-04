@@ -15,7 +15,8 @@ import { dbGetAll } from '../store/db.js';
 import { formatBytes, formatRelative } from '../utils/format.js';
 import { SOCIAL_PRESETS, getSocialPreset } from '../utils/social-presets.js';
 import { isConfigured, getSession, signOut, onAuthChange } from '../sync/auth.js';
-import { getSyncState, onSyncState, syncNow, deleteCloudData } from '../sync/sync.js';
+import { getSyncState, onSyncState, syncNow, deleteCloudData, getQuota, refreshQuota } from '../sync/sync.js';
+import { setPendingAuthMode } from '../state.js';
 import { injectStyle } from '../utils/dom.js';
 
 const CSS = `
@@ -142,7 +143,7 @@ export default async function profile(view, params, ctx) {
       const text = document.createElement('p');
       text.className = 'profile-sync__text';
       text.textContent = isConfigured()
-        ? 'Sign in to sync your templates and brand assets across devices.'
+        ? 'Sign in to back up your projects, templates, and brand logos, and use them on another device.'
         : 'Cloud sync is not set up in this build yet. Everything works on this device.';
       card.append(title, text);
       if (isConfigured()) card.append(Button({ label: 'Sign in to sync', variant: 'primary', full: true, onClick: () => ctx.navigate('/auth') }));
@@ -165,13 +166,24 @@ export default async function profile(view, params, ctx) {
     paintState(getSyncState());
     unsubscribers.push(onSyncState(paintState));
 
+    const spaceRow = SettingsRow({ label: 'Cloud space', value: '' });
+    function paintSpace() {
+      const q = getQuota();
+      spaceRow.setValue(formatBytes(q.used) + ' of ' + formatBytes(q.limit));
+    }
+    paintSpace();
+    refreshQuota().then(paintSpace);
+    unsubscribers.push(onSyncState((s) => { if (s.status === 'ok') paintSpace(); }));
+
     const syncRow = SettingsRow({ label: 'Sync now', onClick: () => syncNow() });
+    const manageRow = SettingsRow({ label: 'Manage synced projects and templates', onClick: () => ctx.navigate('/sync') });
+    const passwordRow = SettingsRow({ label: 'Change password', onClick: () => { setPendingAuthMode('change'); ctx.navigate('/auth'); } });
     const deleteRow = SettingsRow({
       label: 'Delete cloud data', danger: true,
       async onClick() {
         const ok = await confirmDialog({
           title: 'Delete cloud data?',
-          text: 'Your synced copies are removed from the cloud. Everything on this device stays.',
+          text: 'Everything synced to your account is removed from the cloud. Everything on this device stays, and projects and templates will not sync again until you sync them from Manage.',
           confirmLabel: 'Delete', danger: true,
         });
         if (!ok) return;
@@ -181,8 +193,8 @@ export default async function profile(view, params, ctx) {
     });
     const outRow = SettingsRow({ label: 'Sign out', onClick: () => { signOut(); showToast('Signed out'); } });
     accountHost.append(
-      SettingsGroup({ title: 'Sync', items: [syncRow.el, lastRow.el] }),
-      SettingsGroup({ title: 'Account', items: [outRow.el] }),
+      SettingsGroup({ title: 'Sync', items: [syncRow.el, lastRow.el, spaceRow.el, manageRow.el] }),
+      SettingsGroup({ title: 'Account', items: [passwordRow.el, outRow.el] }),
       SettingsGroup({ items: [deleteRow.el] })
     );
   }

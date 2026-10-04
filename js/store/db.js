@@ -46,5 +46,13 @@ async function run(storeName, mode, action) {
 
 export const dbGet = (store, key) => run(store, 'readonly', (s) => s.get(key));
 export const dbGetAll = (store) => run(store, 'readonly', (s) => s.getAll());
-export const dbPut = (store, value) => run(store, 'readwrite', (s) => s.put(value));
+// The sync engine listens here so local edits are uploaded soon. Its own writes pass { silent: true }.
+let writeHook = null;
+export function setWriteHook(fn) { writeHook = fn; }
+
+export async function dbPut(store, value, { silent = false } = {}) {
+  const result = await run(store, 'readwrite', (s) => s.put(value));
+  if (!silent && writeHook && store !== 'photos' && store !== 'meta') writeHook(store);
+  return result;
+}
 export const dbDelete = (store, key) => run(store, 'readwrite', (s) => s.delete(key));

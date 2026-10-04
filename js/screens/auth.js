@@ -5,9 +5,9 @@ import { TextField } from '../components/TextField.js';
 import { Button } from '../components/Button.js';
 import { SegmentedControl } from '../components/SegmentedControl.js';
 import { showToast } from '../components/Toast.js';
-import { isConfigured, signIn, signUp, recover, updatePassword } from '../sync/auth.js';
+import { isConfigured, getSession, signIn, signUp, recover, updatePassword, changePassword } from '../sync/auth.js';
 import { syncNow } from '../sync/sync.js';
-import { takePendingAuthMode } from '../state.js';
+import { takePendingAuthMode, takePendingAuthNotice } from '../state.js';
 import { injectStyle } from '../utils/dom.js';
 
 const CSS = `
@@ -24,8 +24,9 @@ const CSS = `
 export default async function auth(view, params, ctx) {
   injectStyle('screen-auth', CSS);
 
-  let mode = takePendingAuthMode() || 'signin'; // signin | signup | forgot | sent | reset
+  let mode = takePendingAuthMode() || 'signin'; // signin | signup | forgot | sent | reset | change
   let sentText = '';
+  let notice = takePendingAuthNotice();
 
   const root = document.createElement('div');
   root.className = 'screen';
@@ -74,8 +75,47 @@ export default async function auth(view, params, ctx) {
     if (mode === 'sent') {
       wrap.append(
         brand('Check your email', sentText),
-        Button({ label: 'Back to sign in', variant: 'secondary', full: true, onClick: () => { mode = 'signin'; render(); } })
+        getSession()
+          ? Button({ label: 'Back to profile', variant: 'secondary', full: true, onClick: () => ctx.navigate('/profile') })
+          : Button({ label: 'Back to sign in', variant: 'secondary', full: true, onClick: () => { mode = 'signin'; render(); } })
       );
+      body.replaceChildren(wrap);
+      return;
+    }
+
+    if (mode === 'change') {
+      const session = getSession();
+      if (!session) { mode = 'signin'; render(); return; }
+      const current = TextField({ label: 'Current password', type: 'password', autocomplete: 'current-password' });
+      const pw = TextField({ label: 'New password', type: 'password', autocomplete: 'new-password' });
+      const pw2 = TextField({ label: 'Confirm new password', type: 'password', autocomplete: 'new-password' });
+      const submit = Button({
+        label: 'Change password', variant: 'primary', full: true,
+        async onClick() {
+          [current, pw, pw2].forEach((f) => f.hint.set('neutral', ''));
+          if (!current.input.value) { current.hint.set('danger', 'Enter your current password.'); return; }
+          if (pw.input.value.length < 6) { pw.hint.set('danger', 'Use at least 6 characters.'); return; }
+          if (pw.input.value === current.input.value) { pw.hint.set('danger', 'Choose a different password.'); return; }
+          if (pw.input.value !== pw2.input.value) { pw2.hint.set('danger', 'Passwords do not match.'); return; }
+          submit.disabled = true;
+          try { await changePassword(current.input.value, pw.input.value); showToast('Password changed'); ctx.navigate('/profile'); }
+          catch (err) {
+            const wrong = /current password/i.test(err.message);
+            (wrong ? current : pw).hint.set('danger', err.message);
+            submit.disabled = false;
+          }
+        },
+      });
+      const forgotCurrent = document.createElement('button');
+      forgotCurrent.type = 'button';
+      forgotCurrent.className = 'auth__link';
+      forgotCurrent.textContent = 'Forgot your current password?';
+      forgotCurrent.addEventListener('click', async () => {
+        forgotCurrent.disabled = true;
+        try { await recover(session.user.email); sentText = 'We sent a password reset link to ' + session.user.email + '.'; mode = 'sent'; render(); }
+        catch (err) { showToast(err.message, 'danger'); forgotCurrent.disabled = false; }
+      });
+      wrap.append(brand('Change password', 'Enter your current password, then choose a new one.'), current.el, pw.el, pw2.el, submit, forgotCurrent);
       body.replaceChildren(wrap);
       return;
     }
@@ -111,7 +151,8 @@ export default async function auth(view, params, ctx) {
         },
       });
       wrap.append(
-        brand('Forgot password', 'Enter your email and we will send you a reset link.'), email.el, submit,
+        brand('Forgot password', 'Enter your email and we will send you a reset link.'),
+        ...(notice ? [note(notice)] : []), email.el, submit,
         Object.assign(Button({ label: 'Back to sign in', variant: 'ghost', full: true, onClick: () => { mode = 'signin'; render(); } }))
       );
       body.replaceChildren(wrap);

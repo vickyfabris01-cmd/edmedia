@@ -5,6 +5,7 @@ const routes = [
   { name: 'projects', path: '/projects', nav: true, load: () => import('./screens/projects.js') },
   { name: 'profile', path: '/profile', nav: true, load: () => import('./screens/profile.js') },
   { name: 'brand', path: '/brand', nav: false, load: () => import('./screens/brand.js') },
+  { name: 'manage', path: '/sync', nav: false, load: () => import('./screens/sync-manage.js') },
   { name: 'auth', path: '/auth', nav: false, load: () => import('./screens/auth.js') },
   { name: 'slot', path: '/slot/:templateId', nav: false, load: () => import('./screens/slot.js') },
   { name: 'editor', path: '/editor/:projectId', nav: false, load: () => import('./screens/editor.js') },

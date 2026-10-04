@@ -151,6 +151,8 @@ export default async function editor(view, params, ctx) {
   function persist(withThumb) {
     writing = writing.then(async () => {
       try {
+        const fresh = await getProject(project.id);
+        if (fresh) { project.cloud = fresh.cloud; project.syncOff = fresh.syncOff; }
         project.recipe = cloneRecipe(recipe);
         project.updatedAt = Date.now();
         if (withThumb) project.thumbnail = await makeThumbnailBlob(recipe, sources, 240);
