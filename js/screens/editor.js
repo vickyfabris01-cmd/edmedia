@@ -13,6 +13,8 @@ import { AdjustPanel } from '../editor/panels/adjust.js';
 import { FiltersPanel } from '../editor/panels/filters.js';
 import { MaskPanel } from '../editor/panels/mask.js';
 import { BlurPanel } from '../editor/panels/blur.js';
+import { VignettePanel } from '../editor/panels/vignette.js';
+import { MonoPanel } from '../editor/panels/mono.js';
 import { TextPanel } from '../editor/panels/text.js';
 import { WatermarkPanel } from '../editor/panels/watermark.js';
 import { ShapesPanel } from '../editor/panels/shapes.js';
@@ -56,8 +58,10 @@ const TOOLS = [
   { id: 'crop', label: 'Crop', icon: 'crop', make: CropPanel },
   { id: 'adjust', label: 'Adjust', icon: 'adjust', make: AdjustPanel },
   { id: 'filters', label: 'Filters', icon: 'filters', make: FiltersPanel },
+  { id: 'vignette', label: 'Vignette', icon: 'vignette', make: VignettePanel },
   { id: 'mask', label: 'Mask', icon: 'mask', make: MaskPanel },
   { id: 'blur', label: 'Blur', icon: 'blur', make: BlurPanel },
+  { id: 'mono', label: 'Selective', icon: 'mono', make: MonoPanel },
   { id: 'text', label: 'Text', icon: 'text', make: TextPanel },
   { id: 'watermark', label: 'Watermark', icon: 'watermark', make: WatermarkPanel },
   { id: 'shapes', label: 'Shapes', icon: 'shapes', make: ShapesPanel },
@@ -65,7 +69,7 @@ const TOOLS = [
   { id: 'resize', label: 'Resize', icon: 'resize', make: ResizePanel },
 ];
 
-const DELETE_TOOLS = ['text', 'watermark', 'shapes', 'blur'];
+const DELETE_TOOLS = ['text', 'watermark', 'shapes', 'blur', 'mono'];
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 export default async function editor(view, params, ctx) {
@@ -174,7 +178,8 @@ export default async function editor(view, params, ctx) {
   // ---------- Stage ----------
   const stage = createStage();
   function draw() {
-    stage.render(recipe, sources, { original: showOriginal });
+    const previewId = panel && panel.built.selectionPreview ? panel.built.selectionPreview() : null;
+    stage.render(recipe, sources, { original: showOriginal, selectionPreviewId: previewId });
     refreshOverlay();
   }
   function requestRender() {

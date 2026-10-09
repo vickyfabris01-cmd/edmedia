@@ -14,14 +14,27 @@ If you see stale files after an update, clear site data for the address once (th
 ## What is inside
 
 - Editor: crop, rotate, flip, straighten, zoom, adjust (16 sliders), 10 filter looks (plus saved looks),
-  mask (apply edits inside or outside a shape), text, watermark (text, logo, repeating), shapes, layers,
-  resize, undo and redo, hold-to-compare.
-- Templates: 8 built-in templates plus your own. Using a template lets you drag and zoom your photo
+  vignette (strength, amount, softness, roundness, position, light edges), mask (apply edits inside or outside
+  a shape), blur, selective black and white (smart edge-snapping brush, brush, select person, rectangle, ellipse),
+  text, watermark (text, logo, repeating), shapes, layers, resize, undo and redo, hold-to-compare.
+- Templates: 9 built-in templates plus your own. Using a template lets you drag and zoom your photo
   into place first, then the template takes over. A template is never changed by a session.
   "Save as template" is always in the editor menu. Template names are checked live and duplicates are blocked.
 - Export: JPEG, PNG, WebP, quality, size and social presets, live preview and file size, download and share.
 - Projects autosave on the device. Photos stay on the device.
 - Profile: theme (device, light, dark), export defaults, brand library (your logos), storage, cloud sync.
+
+## Select person (optional files)
+
+The Selective B&W tool can find people in a photo automatically. It runs on the phone, nothing is uploaded.
+Its files (about 6 MB, from the `@mediapipe/selfie_segmentation` package) are not stored in the repo:
+
+    node tools/fetch-segmenter.mjs
+
+This puts them in `assets/vendor/selfie_segmentation/`. Deploy that folder with the app. They are saved on the
+device the first time someone uses Select person, then work offline. They are never part of the install cache
+(`gen-precache.mjs` skips any folder named `vendor`). If the folder is missing, the app loads them from the
+internet instead. The smart brush, brush and shapes need no extra files.
 
 ## Cloud sync (Supabase)
 
@@ -50,7 +63,8 @@ Projects and their photos stay on the device.
     js/sync/        Supabase sign-in and sync
     js/data/        built-in templates
     supabase/       database schema
-    tools/          gen-precache.mjs
+    tools/          gen-precache.mjs, fetch-segmenter.mjs
+    assets/vendor/  optional person-detector files (made by fetch-segmenter.mjs)
 
 Conventions: component files are PascalCase.js, everything else is lowercase. No emojis, filled SVG icons only
 (`js/icons.js`). Colors, spacing and type come from `css/tokens.css`.

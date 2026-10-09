@@ -3,6 +3,7 @@
 import { createCanvas, sourceSize } from './canvas.js';
 import { mergeValues } from './filters.js';
 import { applyPixelOps, hasPixelEffect, blurImageData } from './pixels.js';
+import { maskSize, unpackMaskCached, rasterShape, blurMask, maskBounds } from './maskops.js';
 
 export const FONTS = {
   sans: { label: 'Sans', css: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' },
@@ -118,6 +119,44 @@ function drawVignette(canvas, amount) {
   ctx.fillRect(0, 0, w, h);
 }
 
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+// The Vignette tool. v: { amount, strength, soft, round, x, y, light }
+//  strength: how dark (or light) the edges get
+//  amount: how far the effect reaches in from the edges
+//  soft: how gradual the change is; round: 0 follows the picture's shape, 100 is a circle
+//  x, y: move the centre (-100 to 100); light: white edges instead of dark
+function drawVignetteTool(canvas, v) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  const round = clamp01((v.round == null ? 50 : v.round) / 100);
+  const half = Math.hypot(w, h) / 2;
+  const a = (w / Math.SQRT2) * (1 - round) + half * round;
+  const b = (h / Math.SQRT2) * (1 - round) + half * round;
+  const t0 = 1 - 0.95 * clamp01((v.amount == null ? 50 : v.amount) / 100);
+  if (t0 >= 0.999) return;
+  const t1 = t0 + (1 - t0) * (0.12 + 0.88 * clamp01((v.soft == null ? 60 : v.soft) / 100));
+  const strength = clamp01((v.strength == null ? 60 : v.strength) / 100);
+  const rgb = v.light ? '255,255,255' : '0,0,0';
+  const cx = w / 2 + ((v.x || 0) / 100) * (w / 2);
+  const cy = h / 2 + ((v.y || 0) / 100) * (h / 2);
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  g.addColorStop(0, 'rgba(' + rgb + ',0)');
+  g.addColorStop(t0, 'rgba(' + rgb + ',0)');
+  const N = 10;
+  for (let i = 1; i <= N; i++) {
+    const u = i / N;
+    g.addColorStop(Math.min(1, t0 + (t1 - t0) * u), 'rgba(' + rgb + ',' + (strength * u * u * (3 - 2 * u)).toFixed(4) + ')');
+  }
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(a, b);
+  ctx.fillStyle = g;
+  ctx.fillRect(-cx / a, -cy / b, w / a, h / b);
+  ctx.restore();
+}
+
 function renderPhoto(ctx, layer, recipe, img, W, H, original) {
   const sp = slotPx(recipe, W, H);
   let base = createCanvas(sp.w, sp.h);
@@ -143,9 +182,12 @@ function renderPhoto(ctx, layer, recipe, img, W, H, original) {
       octx.putImageData(id, 0, 0);
       if (layer.mask) out = maskedBlend(base, out, layer.mask, sp.w, sp.h);
     }
-    if ((v.vignette || 0) > 0.5) {
+    const tool = layer.vignette;
+    const hasTool = !!tool && (tool.strength || 0) > 0.5 && (tool.amount || 0) > 0.5;
+    if ((v.vignette || 0) > 0.5 || hasTool) {
       if (out === base) { out = createCanvas(sp.w, sp.h); out.getContext('2d').drawImage(base, 0, 0); }
-      drawVignette(out, v.vignette);
+      if ((v.vignette || 0) > 0.5) drawVignette(out, v.vignette);
+      if (hasTool) drawVignetteTool(out, tool);
     }
     base = out;
   }
@@ -426,6 +468,121 @@ function drawBlur(ctx, layer, W, H) {
   ctx.drawImage(blurred, bx, by);
 }
 
+// ---------- Selective black and white ----------
+
+// The soft-edged selection as a grid of 0-255, or null when nothing is selected yet.
+function monoWeights(layer, W, H) {
+  let data;
+  let gw;
+  let gh;
+  if (layer.shape === 'rect' || layer.shape === 'ellipse') {
+    const size = maskSize(W, H, Math.min(1024, Math.max(W, H)));
+    gw = size.w;
+    gh = size.h;
+    data = rasterShape(layer.shape, layer.cx, layer.cy, layer.w, layer.h, gw, gh);
+  } else {
+    // While someone is painting, the newest strokes are in layer._live (hidden from saving and copying)
+    const live = layer._live;
+    if (live) { gw = live.w; gh = live.h; data = Uint8Array.from(live.data); }
+    else {
+      if (!layer.mask || !layer.mask.rle) return null;
+      gw = layer.mask.w;
+      gh = layer.mask.h;
+      data = Uint8Array.from(unpackMaskCached(layer.mask)); // a copy, because the soft edge changes it
+    }
+  }
+  const raw = Uint8Array.from(data); // the selection as drawn, before the soft edge
+  const feather = ((layer.feather || 0) / 100) * 0.04 * Math.max(gw, gh);
+  if (feather >= 1) blurMask(data, gw, gh, feather);
+  return { data, gw, gh, raw };
+}
+
+// Turns the selected area (or everything else) black and white, and can add colour to the rest.
+// layer: { shape, mask | cx cy w h, target: 'inside' | 'outside', amount, boost, feather }
+function drawMono(ctx, layer, W, H, preview) {
+  const weights = monoWeights(layer, W, H);
+  if (!weights) return;
+  const { data: m, gw, gh } = weights;
+  const box = maskBounds(m, gw, gh, 1);
+  if (!box) return; // nothing selected: no effect
+  const outside = layer.target === 'outside';
+  const op = layer.opacity == null ? 1 : layer.opacity;
+  const amount = clamp01((layer.amount == null ? 100 : layer.amount) / 100) * op;
+  const boost = clamp01((layer.boost || 0) / 100);
+  const bf = 1 + boost * 0.8;
+  if (amount <= 0 && boost <= 0) return;
+
+  // Without a colour boost only the selected area changes, so only that part is processed
+  let x0 = 0, y0 = 0, x1 = W, y1 = H;
+  if (!outside && boost === 0) {
+    x0 = Math.max(0, Math.floor((box.x0 * W) / gw) - 3);
+    y0 = Math.max(0, Math.floor((box.y0 * H) / gh) - 3);
+    x1 = Math.min(W, Math.ceil((box.x1 * W) / gw) + 3);
+    y1 = Math.min(H, Math.ceil((box.y1 * H) / gh) + 3);
+  }
+  const rw = x1 - x0;
+  const rh = y1 - y0;
+  if (rw < 1 || rh < 1) return;
+  const img = ctx.getImageData(x0, y0, rw, rh);
+  const d = img.data;
+
+  // Smooth sampling of the selection grid at every pixel
+  const xa = new Int32Array(rw);
+  const xb = new Int32Array(rw);
+  const xf = new Float32Array(rw);
+  for (let i = 0; i < rw; i++) {
+    const g = ((x0 + i + 0.5) * gw) / W - 0.5;
+    const a = Math.floor(g);
+    xa[i] = Math.min(gw - 1, Math.max(0, a));
+    xb[i] = Math.min(gw - 1, Math.max(0, a + 1));
+    xf[i] = g - a;
+  }
+  for (let j = 0; j < rh; j++) {
+    const g = ((y0 + j + 0.5) * gh) / H - 0.5;
+    const a = Math.floor(g);
+    const rowA = Math.min(gh - 1, Math.max(0, a)) * gw;
+    const rowB = Math.min(gh - 1, Math.max(0, a + 1)) * gw;
+    const fy = g - a;
+    for (let i = 0; i < rw; i++) {
+      const top = m[rowA + xa[i]] * (1 - xf[i]) + m[rowA + xb[i]] * xf[i];
+      const bot = m[rowB + xa[i]] * (1 - xf[i]) + m[rowB + xb[i]] * xf[i];
+      let wgt = (top * (1 - fy) + bot * fy) / 255;
+      if (outside) wgt = 1 - wgt;
+      const t = wgt * amount;
+      if (t < 0.002 && boost === 0) continue;
+      const p = (j * rw + i) * 4;
+      const r = d[p];
+      const gr = d[p + 1];
+      const b = d[p + 2];
+      const l = 0.299 * r + 0.587 * gr + 0.114 * b;
+      const f = (1 - t) * bf;
+      d[p] = l + (r - l) * f;
+      d[p + 1] = l + (gr - l) * f;
+      d[p + 2] = l + (b - l) * f;
+    }
+  }
+  ctx.putImageData(img, x0, y0);
+
+  // While editing, the selected cells are tinted red so the edges are easy to check
+  if (preview) {
+    const tint = createCanvas(gw, gh);
+    const tc = tint.getContext('2d');
+    const tdata = tc.createImageData(gw, gh);
+    const raw = weights.raw;
+    for (let i = 0; i < raw.length; i++) {
+      tdata.data[i * 4] = 255;
+      tdata.data[i * 4 + 1] = 40;
+      tdata.data[i * 4 + 2] = 70;
+      tdata.data[i * 4 + 3] = Math.round(raw[i] * 0.42);
+    }
+    tc.putImageData(tdata, 0, 0);
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(tint, 0, 0, W, H);
+    ctx.restore();
+  }
+}
+
 // ---------- Bounds for selection and hit testing (canvas pixels) ----------
 
 export function layerBounds(layer, recipe, sources) {
@@ -446,6 +603,16 @@ export function layerBounds(layer, recipe, sources) {
     const a = blurArea(layer, W, H);
     return a ? { cx: (a.x0 + a.x1) / 2, cy: (a.y0 + a.y1) / 2, w: a.x1 - a.x0, h: a.y1 - a.y0, rot: 0 } : null;
   }
+  if (layer.type === 'mono') {
+    if (layer.shape === 'rect' || layer.shape === 'ellipse') return { cx: layer.cx * W, cy: layer.cy * H, w: layer.w * W, h: layer.h * H, rot: 0 };
+    const src = layer._live ? { w: layer._live.w, h: layer._live.h, data: layer._live.data } : layer.mask && layer.mask.rle ? { w: layer.mask.w, h: layer.mask.h, data: unpackMaskCached(layer.mask) } : null;
+    if (!src) return null;
+    const b = maskBounds(src.data, src.w, src.h, 8);
+    if (!b) return null;
+    const sx = W / src.w;
+    const sy = H / src.h;
+    return { cx: ((b.x0 + b.x1) / 2) * sx, cy: ((b.y0 + b.y1) / 2) * sy, w: (b.x1 - b.x0) * sx, h: (b.y1 - b.y0) * sy, rot: 0 };
+  }
   if (layer.type === 'watermark' && !layer.tiled) {
     const c = wmContent(layer, sources, W);
     if (!c) return null;
@@ -458,7 +625,7 @@ export function layerBounds(layer, recipe, sources) {
 // ---------- Main entry ----------
 
 // sources: { photo: CanvasImageSource|null, assets: Map(assetId -> CanvasImageSource) }
-// opts: { scale = 1, original = false }
+// opts: { scale = 1, original = false, untilLayerId } - untilLayerId draws only the layers below that layer
 export function renderRecipe(target, recipe, sources, opts = {}) {
   const scale = opts.scale || 1;
   const W = Math.max(1, Math.round(recipe.canvas.width * scale));
@@ -471,6 +638,7 @@ export function renderRecipe(target, recipe, sources, opts = {}) {
   const src = { photo: sources.photo, assets: sources.assets || new Map() };
 
   for (const layer of recipe.layers) {
+    if (opts.untilLayerId && layer.id === opts.untilLayerId) break;
     if (!layer.visible) continue;
     if (opts.original && layer.type !== 'photo') continue;
     ctx.save();
@@ -480,6 +648,7 @@ export function renderRecipe(target, recipe, sources, opts = {}) {
     else if (layer.type === 'shape') drawShape(ctx, layer, W, H);
     else if (layer.type === 'watermark') drawWatermark(ctx, layer, src, W, H);
     else if (layer.type === 'blur') drawBlur(ctx, layer, W, H);
+    else if (layer.type === 'mono') drawMono(ctx, layer, W, H, opts.selectionPreviewId === layer.id);
     ctx.restore();
   }
   return target;

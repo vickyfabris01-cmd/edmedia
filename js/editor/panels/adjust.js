@@ -9,7 +9,7 @@ const PAGES = [
   { id: 'light', label: 'Light', items: [['exposure', 'Exposure'], ['brightness', 'Brightness'], ['contrast', 'Contrast'], ['highlights', 'Highlights'], ['shadows', 'Shadows']] },
   { id: 'color', label: 'Color', items: [['saturation', 'Saturation'], ['temperature', 'Temperature'], ['tint', 'Tint'], ['hue', 'Hue', -180, 180]] },
   { id: 'detail', label: 'Detail', items: [['sharpen', 'Sharpen', 0, 100], ['clarity', 'Clarity'], ['blur', 'Blur', 0, 100]] },
-  { id: 'effects', label: 'Effects', items: [['grayscale', 'Black and white', 0, 100], ['sepia', 'Sepia', 0, 100], ['invert', 'Invert', 0, 100], ['vignette', 'Vignette', 0, 100]] },
+  { id: 'effects', label: 'Effects', items: [['grayscale', 'Black and white', 0, 100], ['sepia', 'Sepia', 0, 100], ['invert', 'Invert', 0, 100]] },
 ];
 
 export function AdjustPanel(api) {

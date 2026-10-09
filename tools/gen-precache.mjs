@@ -5,7 +5,8 @@
 import { readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const SKIP = new Set(['node_modules', 'tools', 'supabase', '.git', 'sw.js', 'precache.js', 'README.md']);
+// vendor holds large optional files (the person detector); the service worker saves them on first use
+const SKIP = new Set(['node_modules', 'tools', 'supabase', '.git', 'sw.js', 'precache.js', 'README.md', 'vendor']);
 const files = [];
 
 (function walk(dir) {

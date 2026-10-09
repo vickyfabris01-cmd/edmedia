@@ -79,7 +79,7 @@ export function createStage({ compare = false } = {}) {
     // Draws the recipe at a size that suits the screen.
     render(recipe, sources, opts = {}) {
       const size = this.setSize(recipe.canvas.width, recipe.canvas.height) || { dw: 300 };
-      renderRecipe(canvas, recipe, sources, { scale: backingScale(size.dw), original: !!opts.original });
+      renderRecipe(canvas, recipe, sources, { scale: backingScale(size.dw), original: !!opts.original, selectionPreviewId: opts.selectionPreviewId });
     },
     renderOriginal(recipe, sources) {
       if (!canvas2) return;

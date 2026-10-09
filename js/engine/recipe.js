@@ -37,6 +37,7 @@ export function getPhotoLayer(recipe) {
 export function templateRecipeFrom(recipe) {
   const copy = cloneRecipe(recipe);
   const photo = getPhotoLayer(copy);
+  copy.layers = copy.layers.filter((l) => !(l.type === 'mono' && l.shape === 'mask')); // a painted selection only fits its own photo
   if (photo) { photo.zoom = 1; photo.ox = 0; photo.oy = 0; photo.rot = 0; photo.flipH = false; photo.flipV = false; photo.straighten = 0; }
   return copy;
 }
@@ -84,11 +85,25 @@ export function newBlurLayer(partial = {}) {
   };
 }
 
+// Selective black and white. shape: 'mask' (a painted selection, see maskops.js), 'rect' or 'ellipse' (cx, cy, w, h as fractions of the canvas).
+// target: 'inside' turns the selection black and white, 'outside' turns everything else black and white.
+export function newMonoLayer(partial = {}) {
+  return {
+    id: newId(), type: 'mono', name: 'Selective B&W', visible: true, opacity: 1,
+    shape: 'mask', target: 'inside', amount: 100, boost: 0, feather: 20, lock: false,
+    cx: 0.5, cy: 0.5, w: 0.4, h: 0.4, mask: null, ...partial,
+  };
+}
+
 export function layerLabel(layer) {
   if (layer.type === 'photo') return 'Photo';
   if (layer.type === 'text') return (layer.content || 'Text').split('\n')[0].slice(0, 24) || 'Text';
   if (layer.type === 'shape') return SHAPE_LABELS[layer.shape] || 'Shape';
   if (layer.type === 'watermark') return layer.mode === 'logo' ? 'Logo watermark' : 'Watermark';
   if (layer.type === 'blur') return layer.shape === 'rect' ? 'Blur (rectangle)' : layer.shape === 'ellipse' ? 'Blur (ellipse)' : 'Blur (brush)';
+  if (layer.type === 'mono') {
+    const how = layer.shape === 'rect' ? 'rectangle' : layer.shape === 'ellipse' ? 'ellipse' : 'painted';
+    return 'Selective B&W (' + how + ')';
+  }
   return 'Layer';
 }
