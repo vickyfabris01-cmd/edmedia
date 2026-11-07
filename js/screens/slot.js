@@ -6,7 +6,7 @@ import { showToast } from '../components/Toast.js';
 import { createStage } from '../editor/stage.js';
 import { getTemplate } from '../store/templates.js';
 import { savePhoto } from '../store/photos.js';
-import { saveProject } from '../store/projects.js';
+import { saveProject, listProjects, uniqueProjectName } from '../store/projects.js';
 import { takePendingPhoto } from '../state.js';
 import { cloneRecipe, getPhotoLayer, templateRecipeFrom } from '../engine/recipe.js';
 import { fixPhotoPosition } from '../engine/render.js';
@@ -152,8 +152,10 @@ export default async function slot(view, params, ctx) {
       const size = sourceSize(bitmap);
       const photoId = await savePhoto(file, size.w, size.h);
       const now = Date.now();
+      // Each project gets its own name ("Poster", "Poster 2", ...) instead of reusing the template name.
+      const name = uniqueProjectName(template.name, await listProjects());
       const project = {
-        id: newId(), name: template.name, templateId: template.id, templateName: template.name,
+        id: newId(), name, templateId: template.id, templateName: template.name,
         recipe: cloneRecipe(recipe), photoId, thumbnail: await makeThumbnailBlob(recipe, sources, 240),
         createdAt: now, updatedAt: now, deleted: false,
       };
@@ -170,4 +172,4 @@ export default async function slot(view, params, ctx) {
     if (raf) cancelAnimationFrame(raf);
     stage.destroy();
   };
-}
+            }
