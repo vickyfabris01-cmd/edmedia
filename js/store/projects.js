@@ -2,6 +2,7 @@
 
 import { dbGet, dbGetAll, dbPut, dbDelete } from './db.js';
 import { newId } from '../utils/ids.js';
+import { nameKey } from '../utils/naming.js';
 
 // Newest first, soft-deleted records hidden.
 export async function listProjects() {
@@ -17,14 +18,26 @@ export function saveProject(project) {
   return dbPut('projects', project);
 }
 
-// Project names are free text and may repeat, so no uniqueness check is needed here.
+// Returns `base` if no live project uses it, otherwise "base 2", "base 3", ...
+// Comparison ignores case and extra spaces, matching how template names are checked.
+export function uniqueProjectName(base, projects, ignoreId = null) {
+  const taken = new Set(
+    projects.filter((p) => !p.deleted && p.id !== ignoreId).map((p) => nameKey(p.name))
+  );
+  if (!taken.has(nameKey(base))) return base;
+  let i = 2;
+  while (taken.has(nameKey(base + ' ' + i))) i++;
+  return base + ' ' + i;
+}
+
 export async function duplicateProject(id) {
-  const current = await dbGet('projects', id);
+  const all = await dbGetAll('projects');
+  const current = all.find((p) => p.id === id);
   if (!current || current.deleted) throw new Error('not-found');
   const now = Date.now();
   const copy = structuredClone(current);
   copy.id = newId();
-  copy.name = current.name + ' copy';
+  copy.name = uniqueProjectName(current.name + ' copy', all);
   copy.createdAt = now;
   copy.updatedAt = now;
   copy.deleted = false;
